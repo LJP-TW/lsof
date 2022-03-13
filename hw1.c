@@ -165,7 +165,7 @@ static void get_exe(char *pid, exe_info *ei)
     ei->valid = 1;
 }
 
-static void print_basicinfo(char *command, char *pid, char *user)
+static void print_basic_info(char *command, char *pid, char *user)
 {
     printf("%s\t\t"
            "%s\t\t"
@@ -177,7 +177,7 @@ static void print_basicinfo(char *command, char *pid, char *user)
 
 static void print_cwd(char *command, char *pid, char *user, cwd_info *ci)
 {
-    print_basicinfo(command, pid, user);
+    print_basic_info(command, pid, user);
 
     if (ci->valid) {
         printf("cwd\t\t"        // FD
@@ -199,7 +199,7 @@ static void print_cwd(char *command, char *pid, char *user, cwd_info *ci)
 
 static void print_root(char *command, char *pid, char *user, root_info *ri)
 {
-    print_basicinfo(command, pid, user);
+    print_basic_info(command, pid, user);
 
     if (ri->valid) {
         printf("rtd\t\t"        // FD
@@ -221,7 +221,7 @@ static void print_root(char *command, char *pid, char *user, root_info *ri)
 
 static void print_exe(char *command, char *pid, char *user, exe_info *ei)
 {
-    print_basicinfo(command, pid, user);
+    print_basic_info(command, pid, user);
 
     if (ei->valid) {
         printf("txt\t\t"        // FD
@@ -239,6 +239,109 @@ static void print_exe(char *command, char *pid, char *user, exe_info *ei)
     }
 
     printf("\n");
+}
+
+static void print_path_info(char *path)
+{
+    struct stat info;
+
+    if (stat(path, &info)) {
+        return;
+    }
+
+    // TYPE
+    if (S_ISREG(info.st_mode)) {
+        printf("REG\t\t");
+    } else if (S_ISDIR(info.st_mode)) {
+        printf("DIR\t\t");
+    } else if (S_ISCHR(info.st_mode)) {
+        printf("CHR\t\t");
+    } else if (S_ISFIFO(info.st_mode)) {
+        printf("FIFO\t\t");
+    } else if (S_ISSOCK(info.st_mode)) {
+        printf("SOCK\t\t");
+    } else {
+        printf("unknown\t\t");
+    }
+
+    // NODE
+    printf("%lu\t\t", info.st_ino);
+
+    // NAME
+    printf("%s", path);
+}
+
+static void print_mem(char *command, char *pid, char *user, char *filepath)
+{
+    print_basic_info(command, pid, user);
+
+    // FD
+    printf("mem\t\t");
+
+    print_path_info(filepath);
+
+    printf("\n");
+}
+
+static void handle_mem_maps(char *command, char *user, struct dirent *procent)
+{
+    char path[BUF_SIZE];
+    char buf[BUF_SIZE];
+    char filepath_buf[BUF_SIZE];
+    char *cur, *filepath = NULL;
+    FILE *mapfile;
+
+    snprintf(path, BUF_SIZE, "/proc/%s/maps", procent->d_name);
+
+    if (!(mapfile = fopen(path, "r"))) {
+        return;
+    }
+
+    filepath_buf[0] = 0;
+
+    // Find files
+    while (fgets(buf, BUF_SIZE, mapfile)) {
+        cur = buf;
+
+        /*
+         * maps format:
+         *  start-from rwxp offset-- dev-- inode path
+         */
+
+        // skip start-from
+        while (*cur != ' ') {
+            cur++;
+        }
+
+        // jump to inode info
+        cur += 21;
+
+        // skip inode info
+        while (*cur != ' ') {
+            cur++;
+        }
+
+        // find path
+        while (*cur == ' ') {
+            cur++;
+        }
+
+        filepath = cur;
+
+        // find new line
+        while (*cur != '\n') {
+            cur++;
+        }
+
+        *cur = 0;
+
+        if (filepath[0] == '/' && strcmp(filepath_buf, filepath)) {
+            print_mem(command, procent->d_name, user, filepath);
+            strcpy(filepath_buf, filepath);
+        }
+    }
+
+    fclose(mapfile);
 }
 
 static void handle_proc_dir(struct dirent *procent)
@@ -280,6 +383,9 @@ static void handle_proc_dir(struct dirent *procent)
 
     // print exe
     print_exe(command, procent->d_name, user, &ei);
+
+    // handle maps
+    handle_mem_maps(command, user, procent);
 }
 
 static void print_banner()
