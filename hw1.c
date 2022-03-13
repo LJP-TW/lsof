@@ -1,0 +1,321 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <pwd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#include "args.h"
+
+#define BUF_SIZE 0x180
+
+typedef struct {
+    int valid;
+    int inode;
+    char path[BUF_SIZE];
+} cwd_info;
+
+typedef struct {
+    int valid;
+    int inode;
+    char path[BUF_SIZE];
+} root_info;
+
+typedef struct {
+    int valid;
+    int inode;
+    char path[BUF_SIZE];
+} exe_info;
+
+static inline int is_numerical_string(char *str)
+{
+    while (*str) {
+        if ('0' > *str || *str > '9')
+            return 0;
+        str++;
+    }
+
+    return 1;
+}
+
+static void get_command(char *pid, char *command)
+{
+    int fd, ret;
+    char path[BUF_SIZE];
+
+    snprintf(path, BUF_SIZE, "/proc/%s/comm", pid);
+
+    if ((fd = open(path, O_RDONLY)) == -1) {
+        return;
+    }
+
+    while ((ret = read(fd, command, BUF_SIZE - 1))) {
+        if (command[ret - 1] == '\n')
+            command[ret - 1] = 0;
+        else
+            command[ret] = 0;
+    }
+
+    close(fd);
+}
+
+static void get_user(char *pid, char *user)
+{
+    struct stat info;
+    struct passwd *owner_info;
+    char path[BUF_SIZE];
+
+    snprintf(path, BUF_SIZE, "/proc/%s", pid);
+
+    if (stat(path, &info)) {
+        return;
+    }
+
+    if (!(owner_info = getpwuid(info.st_uid))) {
+        return;
+    }
+
+    snprintf(user, BUF_SIZE, "%s", owner_info->pw_name);
+}
+
+static void get_cwd(char *pid, cwd_info *ci)
+{
+    struct stat info;
+    int len;
+    char path[BUF_SIZE];
+
+    ci->valid = 0;
+
+    snprintf(path, BUF_SIZE, "/proc/%s/cwd", pid);
+
+    if ((len = readlink(path, ci->path, BUF_SIZE - 1)) == -1) {
+        if (errno == EACCES) {
+            snprintf(ci->path, BUF_SIZE, "/proc/%s/cwd (Permission denied)", pid);
+        }
+        return;
+    }
+
+    ci->path[len] = 0;
+
+    if (stat(path, &info)) {
+        return;
+    }
+
+    ci->inode = info.st_ino;
+    ci->valid = 1;
+}
+
+static void get_root(char *pid, root_info *ri)
+{
+    struct stat info;
+    int len;
+    char path[BUF_SIZE];
+
+    ri->valid = 0;
+
+    snprintf(path, BUF_SIZE, "/proc/%s/root", pid);
+
+    if ((len = readlink(path, ri->path, BUF_SIZE - 1)) == -1) {
+        if (errno == EACCES) {
+            snprintf(ri->path, BUF_SIZE, "/proc/%s/root (Permission denied)", pid);
+        }
+        return;
+    }
+
+    ri->path[len] = 0;
+
+    if (stat(path, &info)) {
+        return;
+    }
+
+    ri->inode = info.st_ino;
+    ri->valid = 1;
+}
+
+static void get_exe(char *pid, exe_info *ei)
+{
+    struct stat info;
+    int len;
+    char path[BUF_SIZE];
+
+    ei->valid = 0;
+
+    snprintf(path, BUF_SIZE, "/proc/%s/exe", pid);
+
+    if ((len = readlink(path, ei->path, BUF_SIZE - 1)) == -1) {
+        if (errno == EACCES) {
+            snprintf(ei->path, BUF_SIZE, "/proc/%s/exe (Permission denied)", pid);
+        } else if (errno == ENOENT) {
+            snprintf(ei->path, BUF_SIZE, "/proc/%s/exe", pid);
+        }
+        return;
+    }
+
+    ei->path[len] = 0;
+
+    if (stat(path, &info)) {
+        return;
+    }
+
+    ei->inode = info.st_ino;
+    ei->valid = 1;
+}
+
+static void print_basicinfo(char *command, char *pid, char *user)
+{
+    printf("%s\t\t"
+           "%s\t\t"
+           "%s\t\t",
+           command,
+           pid,
+           user);
+}
+
+static void print_cwd(char *command, char *pid, char *user, cwd_info *ci)
+{
+    print_basicinfo(command, pid, user);
+
+    if (ci->valid) {
+        printf("cwd\t\t"        // FD
+               "DIR\t\t"        // TYPE
+               "%d\t\t"         // NODE
+               "%s",            // NAME
+               ci->inode,
+               ci->path);
+    } else {
+        printf("cwd\t\t"        // FD
+               "unknown\t\t"    // TYPE
+               " \t\t"          // NODE
+               "%s",            // NAME
+               ci->path);
+    }
+
+    printf("\n");
+}
+
+static void print_root(char *command, char *pid, char *user, root_info *ri)
+{
+    print_basicinfo(command, pid, user);
+
+    if (ri->valid) {
+        printf("rtd\t\t"        // FD
+               "DIR\t\t"        // TYPE
+               "%d\t\t"         // NODE
+               "%s",            // NAME
+               ri->inode,
+               ri->path);
+    } else {
+        printf("rtd\t\t"        // FD
+               "unknown\t\t"    // TYPE
+               " \t\t"          // NODE
+               "%s",            // NAME
+               ri->path);
+    }
+
+    printf("\n");
+}
+
+static void print_exe(char *command, char *pid, char *user, exe_info *ei)
+{
+    print_basicinfo(command, pid, user);
+
+    if (ei->valid) {
+        printf("txt\t\t"        // FD
+               "REG\t\t"        // TYPE
+               "%d\t\t"         // NODE
+               "%s",            // NAME
+               ei->inode,
+               ei->path);
+    } else {
+        printf("txt\t\t"        // FD
+               "unknown\t\t"    // TYPE
+               " \t\t"          // NODE
+               "%s",            // NAME
+               ei->path);
+    }
+
+    printf("\n");
+}
+
+static void handle_proc_dir(struct dirent *procent)
+{
+    char command[BUF_SIZE];
+    char user[BUF_SIZE];
+    cwd_info ci;
+    root_info ri;
+    exe_info ei;
+
+    if (procent->d_type != DT_DIR) {
+        return;
+    }
+
+    if (!is_numerical_string(procent->d_name)) {
+        return;
+    }
+
+    // get command
+    get_command(procent->d_name, command);
+
+    // get user
+    get_user(procent->d_name, user);
+
+    // get cwd
+    get_cwd(procent->d_name, &ci);
+
+    // print cwd
+    print_cwd(command, procent->d_name, user, &ci);
+
+    // get root
+    get_root(procent->d_name, &ri);
+
+    // print root
+    print_root(command, procent->d_name, user, &ri);
+
+    // get exe
+    get_exe(procent->d_name, &ei);
+
+    // print exe
+    print_exe(command, procent->d_name, user, &ei);
+}
+
+static void print_banner()
+{
+    printf("COMMAND\t\t"
+           "PID\t\t"
+           "USER\t\t"
+           "FD\t\t"
+           "TYPE\t\t"
+           "NODE\t\t"
+           "NAME\n");
+}
+
+int main(int argc, char **argv)
+{
+    DIR *procdir;
+    struct dirent *procent;
+
+    parse_args(argc, argv);
+
+    if (!(procdir = opendir("/proc"))) {
+        fprintf(stderr, "[x] Cannot open /proc\n");
+        exit(1);
+    }
+
+    errno = 0;
+    
+    print_banner();
+    while ((procent = readdir(procdir))) {
+        handle_proc_dir(procent);
+    }
+    
+    if (errno) {
+        fprintf(stderr, "[x] readdir error\n");
+        exit(1);
+    }
+
+    return 0;
+}
