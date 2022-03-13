@@ -353,13 +353,14 @@ static void handle_mem_maps(char *command, char *user, struct dirent *procent)
         *cur = 0;
 
         if (filepath[0] == '/' && strcmp(filepath_buf, filepath)) {
-            if (!strcmp(&filepath[strlen(filepath) - 9], "(deleted)")) {
+            strcpy(filepath_buf, filepath);
+
+            if (!strcmp(&filepath[strlen(filepath) - 10], " (deleted)")) {
+                filepath[strlen(filepath) - 10] = 0;
                 print_delmem(command, procent->d_name, user, filepath, atoi(pinode));
             } else {
                 print_mem(command, procent->d_name, user, filepath);
             }
-
-            strcpy(filepath_buf, filepath);
         }
     }
 
