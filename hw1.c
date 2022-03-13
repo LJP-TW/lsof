@@ -271,6 +271,20 @@ static void print_path_info(char *path)
     printf("%s", path);
 }
 
+static void print_delmem(char *command, char *pid, char *user, char *filepath, int inode)
+{
+    print_basic_info(command, pid, user);
+
+    printf("DEL\t\t"        // FD
+           "REG\t\t"        // TYPE
+           "%d\t\t"         // NODE
+           "%s",            // NAME
+           inode,
+           filepath);
+
+    printf("\n");
+}
+
 static void print_mem(char *command, char *pid, char *user, char *filepath)
 {
     print_basic_info(command, pid, user);
@@ -288,7 +302,7 @@ static void handle_mem_maps(char *command, char *user, struct dirent *procent)
     char path[BUF_SIZE];
     char buf[BUF_SIZE];
     char filepath_buf[BUF_SIZE];
-    char *cur, *filepath = NULL;
+    char *cur, *filepath = NULL, *pinode;
     FILE *mapfile;
 
     snprintf(path, BUF_SIZE, "/proc/%s/maps", procent->d_name);
@@ -316,10 +330,13 @@ static void handle_mem_maps(char *command, char *user, struct dirent *procent)
         // jump to inode info
         cur += 21;
 
-        // skip inode info
+        pinode = cur;
+
         while (*cur != ' ') {
             cur++;
         }
+
+        *cur++ = 0;
 
         // find path
         while (*cur == ' ') {
@@ -336,7 +353,12 @@ static void handle_mem_maps(char *command, char *user, struct dirent *procent)
         *cur = 0;
 
         if (filepath[0] == '/' && strcmp(filepath_buf, filepath)) {
-            print_mem(command, procent->d_name, user, filepath);
+            if (!strcmp(&filepath[strlen(filepath) - 9], "(deleted)")) {
+                print_delmem(command, procent->d_name, user, filepath, atoi(pinode));
+            } else {
+                print_mem(command, procent->d_name, user, filepath);
+            }
+
             strcpy(filepath_buf, filepath);
         }
     }
