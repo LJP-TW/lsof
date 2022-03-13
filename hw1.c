@@ -366,7 +366,118 @@ static void handle_mem_maps(char *command, char *user, struct dirent *procent)
     fclose(mapfile);
 }
 
-static void handle_proc_dir(struct dirent *procent)
+static void hadnle_fd_ent(char *command, char *user, struct dirent *procent, struct dirent *fdent)
+{
+    int len;
+    char fdpath[BUF_SIZE];
+    char path[BUF_SIZE];
+    struct stat info, link_info;
+
+    if (fdent->d_type != DT_LNK) {
+        return;
+    }
+
+    if (!is_numerical_string(fdent->d_name)) {
+        return;
+    }
+    
+    print_basic_info(command, procent->d_name, user);
+
+    snprintf(fdpath, BUF_SIZE, "/proc/%s/fd/%s", procent->d_name, fdent->d_name);
+
+    if ((len = readlink(fdpath, path, BUF_SIZE - 1)) == -1) {
+        // TODO: Handle error
+        printf("\n");
+        return;
+    }
+
+    path[len] = 0;
+    
+    if (stat(fdpath, &info)) {
+        return;
+    }
+
+    if (lstat(fdpath, &link_info)) {
+        return;
+    }
+
+    // FD
+    printf("%s", fdent->d_name);
+
+    switch (link_info.st_mode & 0600) {
+    case 0600:
+        printf("u");
+        break;
+    case 0400:
+        printf("r");
+        break;
+    case 0200:
+        printf("w");
+        break;
+    default:
+        break;
+    }
+
+    printf("\t\t");
+
+    // TYPE
+    if (S_ISREG(info.st_mode)) {
+        printf("REG\t\t");
+    } else if (S_ISDIR(info.st_mode)) {
+        printf("DIR\t\t");
+    } else if (S_ISCHR(info.st_mode)) {
+        printf("CHR\t\t");
+    } else if (S_ISFIFO(info.st_mode)) {
+        printf("FIFO\t\t");
+    } else if (S_ISSOCK(info.st_mode)) {
+        printf("SOCK\t\t");
+    } else {
+        printf("unknown\t\t");
+    }
+
+    // NODE
+    printf("%lu\t\t", info.st_ino);
+
+    // NAME
+    printf("%s", path);
+
+    printf("\n");
+}
+
+static void handle_fd_dir(char *command, char *user, struct dirent *procent)
+{
+    DIR *fddir;
+    struct dirent *fdent;
+    char path[BUF_SIZE];
+
+    snprintf(path, BUF_SIZE, "/proc/%s/fd", procent->d_name);
+
+    if (!(fddir = opendir(path))) {
+        print_basic_info(command, procent->d_name, user);
+        printf("NOFD\t\t"        // FD
+               " \t\t"           // TYPE
+               " \t\t"           // NODE
+               "%s"              // NAME
+               " (Permission denied)\n",
+               path);
+        return;
+    }
+
+    errno = 0;
+
+    while ((fdent = readdir(fddir))) {
+        hadnle_fd_ent(command, user, procent, fdent);
+    }
+
+    if (errno) {
+        fprintf(stderr, "[x] handle_fd_dir: readdir error\n");
+        exit(1);
+    }
+
+    closedir(fddir);
+}
+
+static void handle_proc_ent(struct dirent *procent)
 {
     char command[BUF_SIZE];
     char user[BUF_SIZE];
@@ -408,6 +519,9 @@ static void handle_proc_dir(struct dirent *procent)
 
     // handle maps
     handle_mem_maps(command, user, procent);
+
+    // handle fd
+    handle_fd_dir(command, user, procent);
 }
 
 static void print_banner()
@@ -437,11 +551,11 @@ int main(int argc, char **argv)
     
     print_banner();
     while ((procent = readdir(procdir))) {
-        handle_proc_dir(procent);
+        handle_proc_ent(procent);
     }
     
     if (errno) {
-        fprintf(stderr, "[x] readdir error\n");
+        fprintf(stderr, "[x] main: readdir error\n");
         exit(1);
     }
 
