@@ -471,6 +471,7 @@ static void handle_fd_dir(struct dirent *procent)
 
     while ((fdent = readdir(fddir))) {
         hadnle_fd_ent(procent, fdent);
+        errno = 0;
     }
 
     if (errno) {
@@ -563,6 +564,7 @@ int main(int argc, char **argv)
     print_banner();
     while ((procent = readdir(procdir))) {
         handle_proc_ent(procent);
+        errno = 0;
     }
     
     if (errno) {
