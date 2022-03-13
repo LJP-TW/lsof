@@ -14,6 +14,18 @@
 #define BUF_SIZE 0x180
 
 typedef struct {
+    char command[BUF_SIZE];
+    char pid[BUF_SIZE];
+    char user[BUF_SIZE];
+    char fd[BUF_SIZE];
+    char type[BUF_SIZE];
+    char node[BUF_SIZE];
+    char name[BUF_SIZE];
+} output_struct;
+
+output_struct output_info;
+
+typedef struct {
     int valid;
     int inode;
     char path[BUF_SIZE];
@@ -79,7 +91,7 @@ static void get_user(char *pid, char *user)
         return;
     }
 
-    snprintf(user, BUF_SIZE, "%s", owner_info->pw_name);
+    strcpy(user, owner_info->pw_name);
 }
 
 static void get_cwd(char *pid, cwd_info *ci)
@@ -165,80 +177,83 @@ static void get_exe(char *pid, exe_info *ei)
     ei->valid = 1;
 }
 
-static void print_basic_info(char *command, char *pid, char *user)
+static void print_output_info()
 {
+    // match type filter
+    if (!match_type_filter(output_info.type)) {
+        return;
+    }
+
+    // match filename filter
+    if (!match_filename_filter(output_info.name)) {
+        return;
+    }
+
     printf("%s\t\t"
            "%s\t\t"
-           "%s\t\t",
-           command,
-           pid,
-           user);
+           "%s\t\t"
+           "%s\t\t"
+           "%s\t\t"
+           "%s\t\t"
+           "%s\n",
+           output_info.command,
+           output_info.pid,
+           output_info.user,
+           output_info.fd,
+           output_info.type,
+           output_info.node,
+           output_info.name);
 }
 
-static void print_cwd(char *command, char *pid, char *user, cwd_info *ci)
+static void print_cwd(cwd_info *ci)
 {
-    print_basic_info(command, pid, user);
-
     if (ci->valid) {
-        printf("cwd\t\t"        // FD
-               "DIR\t\t"        // TYPE
-               "%d\t\t"         // NODE
-               "%s",            // NAME
-               ci->inode,
-               ci->path);
+        strcpy(output_info.fd, "cwd");
+        strcpy(output_info.type, "DIR");
+        snprintf(output_info.node, BUF_SIZE, "%d", ci->inode);
+        strcpy(output_info.name, ci->path);
     } else {
-        printf("cwd\t\t"        // FD
-               "unknown\t\t"    // TYPE
-               " \t\t"          // NODE
-               "%s",            // NAME
-               ci->path);
+        strcpy(output_info.fd, "cwd");
+        strcpy(output_info.type, "unknown");
+        strcpy(output_info.node, " ");
+        strcpy(output_info.name, ci->path);
     }
 
-    printf("\n");
+    print_output_info();
 }
 
-static void print_root(char *command, char *pid, char *user, root_info *ri)
+static void print_root(root_info *ri)
 {
-    print_basic_info(command, pid, user);
-
     if (ri->valid) {
-        printf("rtd\t\t"        // FD
-               "DIR\t\t"        // TYPE
-               "%d\t\t"         // NODE
-               "%s",            // NAME
-               ri->inode,
-               ri->path);
+        strcpy(output_info.fd, "rtd");
+        strcpy(output_info.type, "DIR");
+        snprintf(output_info.node, BUF_SIZE, "%d", ri->inode);        
+        strcpy(output_info.name, ri->path);
     } else {
-        printf("rtd\t\t"        // FD
-               "unknown\t\t"    // TYPE
-               " \t\t"          // NODE
-               "%s",            // NAME
-               ri->path);
+        strcpy(output_info.fd, "rtd");
+        strcpy(output_info.type, "unknown");
+        strcpy(output_info.node, " ");
+        strcpy(output_info.name, ri->path);
     }
 
-    printf("\n");
+    print_output_info();
 }
 
-static void print_exe(char *command, char *pid, char *user, exe_info *ei)
+static void print_exe(exe_info *ei)
 {
-    print_basic_info(command, pid, user);
-
     if (ei->valid) {
-        printf("txt\t\t"        // FD
-               "REG\t\t"        // TYPE
-               "%d\t\t"         // NODE
-               "%s",            // NAME
-               ei->inode,
-               ei->path);
-    } else {
-        printf("txt\t\t"        // FD
-               "unknown\t\t"    // TYPE
-               " \t\t"          // NODE
-               "%s",            // NAME
-               ei->path);
+        strcpy(output_info.fd, "txt");
+        strcpy(output_info.type, "REG");
+        snprintf(output_info.node, BUF_SIZE, "%d", ei->inode);
+        strcpy(output_info.name, ei->path);
+    } else {        
+        strcpy(output_info.fd, "txt");
+        strcpy(output_info.type, "unknown");
+        strcpy(output_info.node, " ");
+        strcpy(output_info.name, ei->path);
     }
 
-    printf("\n");
+    print_output_info();
 }
 
 static void print_path_info(char *path)
@@ -251,53 +266,47 @@ static void print_path_info(char *path)
 
     // TYPE
     if (S_ISREG(info.st_mode)) {
-        printf("REG\t\t");
+        strcpy(output_info.type, "REG");
     } else if (S_ISDIR(info.st_mode)) {
-        printf("DIR\t\t");
+        strcpy(output_info.type, "DIR");
     } else if (S_ISCHR(info.st_mode)) {
-        printf("CHR\t\t");
+        strcpy(output_info.type, "CHR");
     } else if (S_ISFIFO(info.st_mode)) {
-        printf("FIFO\t\t");
+        strcpy(output_info.type, "FIFO");
     } else if (S_ISSOCK(info.st_mode)) {
-        printf("SOCK\t\t");
+        strcpy(output_info.type, "SOCK");
     } else {
-        printf("unknown\t\t");
+        strcpy(output_info.type, "unknown");
     }
 
     // NODE
-    printf("%lu\t\t", info.st_ino);
+    snprintf(output_info.node, BUF_SIZE, "%lu", info.st_ino);
 
     // NAME
-    printf("%s", path);
+    strcpy(output_info.name, path);
 }
 
-static void print_delmem(char *command, char *pid, char *user, char *filepath, int inode)
+static void print_delmem(char *filepath, int inode)
 {
-    print_basic_info(command, pid, user);
+    strcpy(output_info.fd, "DEL");
+    strcpy(output_info.type, "REG");
+    snprintf(output_info.node, BUF_SIZE, "%d", inode);
+    strcpy(output_info.name, filepath);
 
-    printf("DEL\t\t"        // FD
-           "REG\t\t"        // TYPE
-           "%d\t\t"         // NODE
-           "%s",            // NAME
-           inode,
-           filepath);
-
-    printf("\n");
+    print_output_info();
 }
 
-static void print_mem(char *command, char *pid, char *user, char *filepath)
+static void print_mem(char *filepath)
 {
-    print_basic_info(command, pid, user);
-
     // FD
-    printf("mem\t\t");
+    strcpy(output_info.fd, "mem");
 
     print_path_info(filepath);
 
-    printf("\n");
+    print_output_info();
 }
 
-static void handle_mem_maps(char *command, char *user, struct dirent *procent)
+static void handle_mem_maps(struct dirent *procent)
 {
     char path[BUF_SIZE];
     char buf[BUF_SIZE];
@@ -357,9 +366,9 @@ static void handle_mem_maps(char *command, char *user, struct dirent *procent)
 
             if (!strcmp(&filepath[strlen(filepath) - 10], " (deleted)")) {
                 filepath[strlen(filepath) - 10] = 0;
-                print_delmem(command, procent->d_name, user, filepath, atoi(pinode));
+                print_delmem(filepath, atoi(pinode));
             } else {
-                print_mem(command, procent->d_name, user, filepath);
+                print_mem(filepath);
             }
         }
     }
@@ -367,7 +376,7 @@ static void handle_mem_maps(char *command, char *user, struct dirent *procent)
     fclose(mapfile);
 }
 
-static void hadnle_fd_ent(char *command, char *user, struct dirent *procent, struct dirent *fdent)
+static void hadnle_fd_ent(struct dirent *procent, struct dirent *fdent)
 {
     int len;
     char fdpath[BUF_SIZE];
@@ -381,8 +390,6 @@ static void hadnle_fd_ent(char *command, char *user, struct dirent *procent, str
     if (!is_numerical_string(fdent->d_name)) {
         return;
     }
-    
-    print_basic_info(command, procent->d_name, user);
 
     snprintf(fdpath, BUF_SIZE, "/proc/%s/fd/%s", procent->d_name, fdent->d_name);
 
@@ -403,49 +410,45 @@ static void hadnle_fd_ent(char *command, char *user, struct dirent *procent, str
     }
 
     // FD
-    printf("%s", fdent->d_name);
-
     switch (link_info.st_mode & 0600) {
     case 0600:
-        printf("u");
+        snprintf(output_info.fd, BUF_SIZE, "%su", fdent->d_name);
         break;
     case 0400:
-        printf("r");
+        snprintf(output_info.fd, BUF_SIZE, "%sr", fdent->d_name);
         break;
     case 0200:
-        printf("w");
+        snprintf(output_info.fd, BUF_SIZE, "%sw", fdent->d_name);
         break;
     default:
         break;
     }
 
-    printf("\t\t");
-
     // TYPE
     if (S_ISREG(info.st_mode)) {
-        printf("REG\t\t");
+        strcpy(output_info.type, "REG");
     } else if (S_ISDIR(info.st_mode)) {
-        printf("DIR\t\t");
+        strcpy(output_info.type, "DIR");
     } else if (S_ISCHR(info.st_mode)) {
-        printf("CHR\t\t");
+        strcpy(output_info.type, "CHR");
     } else if (S_ISFIFO(info.st_mode)) {
-        printf("FIFO\t\t");
+        strcpy(output_info.type, "FIFO");
     } else if (S_ISSOCK(info.st_mode)) {
-        printf("SOCK\t\t");
+        strcpy(output_info.type, "SOCK");
     } else {
-        printf("unknown\t\t");
+        strcpy(output_info.type, "unknown");
     }
 
     // NODE
-    printf("%lu\t\t", info.st_ino);
+    snprintf(output_info.node, BUF_SIZE, "%lu", info.st_ino);
 
     // NAME
-    printf("%s", path);
+    strcpy(output_info.name, path);
 
-    printf("\n");
+    print_output_info();
 }
 
-static void handle_fd_dir(char *command, char *user, struct dirent *procent)
+static void handle_fd_dir(struct dirent *procent)
 {
     DIR *fddir;
     struct dirent *fdent;
@@ -454,20 +457,20 @@ static void handle_fd_dir(char *command, char *user, struct dirent *procent)
     snprintf(path, BUF_SIZE, "/proc/%s/fd", procent->d_name);
 
     if (!(fddir = opendir(path))) {
-        print_basic_info(command, procent->d_name, user);
-        printf("NOFD\t\t"        // FD
-               " \t\t"           // TYPE
-               " \t\t"           // NODE
-               "%s"              // NAME
-               " (Permission denied)\n",
-               path);
+        strcpy(output_info.fd, "NOFD");
+        strcpy(output_info.type, " ");
+        strcpy(output_info.node, " ");
+        snprintf(output_info.name, BUF_SIZE, "%s (Permission denied)", path);
+
+        print_output_info();
+
         return;
     }
 
     errno = 0;
 
     while ((fdent = readdir(fddir))) {
-        hadnle_fd_ent(command, user, procent, fdent);
+        hadnle_fd_ent(procent, fdent);
     }
 
     if (errno) {
@@ -480,7 +483,6 @@ static void handle_fd_dir(char *command, char *user, struct dirent *procent)
 
 static void handle_proc_ent(struct dirent *procent)
 {
-    char command[BUF_SIZE];
     char user[BUF_SIZE];
     cwd_info ci;
     root_info ri;
@@ -495,34 +497,42 @@ static void handle_proc_ent(struct dirent *procent)
     }
 
     // get command
-    get_command(procent->d_name, command);
+    get_command(procent->d_name, output_info.command);
+
+    // match command filter
+    if (!match_command_filter(output_info.command)) {
+        return;
+    }
+
+    // get pid
+    strcpy(output_info.pid, procent->d_name);
 
     // get user
-    get_user(procent->d_name, user);
+    get_user(procent->d_name, output_info.user);
 
     // get cwd
     get_cwd(procent->d_name, &ci);
 
     // print cwd
-    print_cwd(command, procent->d_name, user, &ci);
+    print_cwd(&ci);
 
     // get root
     get_root(procent->d_name, &ri);
 
     // print root
-    print_root(command, procent->d_name, user, &ri);
+    print_root(&ri);
 
     // get exe
     get_exe(procent->d_name, &ei);
 
     // print exe
-    print_exe(command, procent->d_name, user, &ei);
+    print_exe(&ei);
 
     // handle maps
-    handle_mem_maps(command, user, procent);
+    handle_mem_maps(procent);
 
     // handle fd
-    handle_fd_dir(command, user, procent);
+    handle_fd_dir(procent);
 }
 
 static void print_banner()

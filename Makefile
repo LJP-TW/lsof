@@ -10,3 +10,7 @@ $(TARGET): $(HW1_O_FILES)
 
 %.o: %.c
 	gcc -c $< -o $@
+
+.PHONY: clean
+clean:
+	rm -f *.o $(TARGET)
