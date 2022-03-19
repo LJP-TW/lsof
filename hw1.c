@@ -306,13 +306,15 @@ static void print_mem(char *filepath)
     print_output_info();
 }
 
-static void handle_mem_maps(struct dirent *procent)
+static void handle_mem_maps(struct dirent *procent, char *txt_node)
 {
     char path[BUF_SIZE];
     char buf[BUF_SIZE];
-    char filepath_buf[BUF_SIZE];
     char *cur, *filepath = NULL, *pinode;
     FILE *mapfile;
+    char **nodes = NULL;
+    int cap_nodes = 0x40;
+    int idx_nodes = 0;
 
     snprintf(path, BUF_SIZE, "/proc/%s/maps", procent->d_name);
 
@@ -320,10 +322,25 @@ static void handle_mem_maps(struct dirent *procent)
         return;
     }
 
-    filepath_buf[0] = 0;
+    nodes = malloc(sizeof(char *) * cap_nodes);
+    if (!nodes) {
+        fprintf(stderr, "[x] handle_mem_maps: Cannot malloc\n");
+        goto MEM_MAPS_CLOSE;
+    }
+    
+    nodes[idx_nodes] = malloc(sizeof(char) * BUF_SIZE);
+    if (!nodes[idx_nodes]) {
+        fprintf(stderr, "[x] handle_mem_maps: Cannot malloc\n");
+        goto MEM_MAPS_FREE_NODES;
+    }
+
+    strcpy(nodes[idx_nodes], txt_node);
+    idx_nodes++;
 
     // Find files
     while (fgets(buf, BUF_SIZE, mapfile)) {
+        int is_printed;
+
         cur = buf;
 
         /*
@@ -361,18 +378,60 @@ static void handle_mem_maps(struct dirent *procent)
 
         *cur = 0;
 
-        if (filepath[0] == '/' && strcmp(filepath_buf, filepath)) {
-            strcpy(filepath_buf, filepath);
+        if (filepath[0] != '/') {
+            continue;
+        }
+            
+        is_printed = 0;
 
-            if (!strcmp(&filepath[strlen(filepath) - 10], " (deleted)")) {
-                filepath[strlen(filepath) - 10] = 0;
-                print_delmem(filepath, atoi(pinode));
-            } else {
-                print_mem(filepath);
+        // Check if the file has been printed
+        for (int i = 0; i < idx_nodes; ++i) {
+            if (!strcmp(pinode, nodes[i])) {
+                is_printed = 1;
+                break;
             }
         }
+
+        if (is_printed) {
+            continue;
+        }
+
+        // Print this file
+
+        if (!strcmp(&filepath[strlen(filepath) - 10], " (deleted)")) {
+            filepath[strlen(filepath) - 10] = 0;
+            print_delmem(filepath, atoi(pinode));
+        } else {
+            print_mem(filepath);
+        }
+            
+        if (idx_nodes >= cap_nodes) {
+            nodes = realloc(nodes, sizeof(char *) * cap_nodes * 2);
+            if (!nodes) {
+                fprintf(stderr, "[x] handle_mem_maps: Cannot realloc\n");
+                goto MEM_MAPS_FREE_NODES;
+            }
+
+            cap_nodes *= 2;
+        }
+        
+        nodes[idx_nodes] = malloc(sizeof(char) * BUF_SIZE);
+        if (!nodes[idx_nodes]) {
+            fprintf(stderr, "[x] handle_mem_maps: Cannot malloc\n");
+            goto MEM_MAPS_FREE_NODES;
+        }
+
+        strcpy(nodes[idx_nodes], pinode);
+        idx_nodes++;        
     }
 
+MEM_MAPS_FREE_NODES:
+    while (--idx_nodes >= 0) {
+        free(nodes[idx_nodes]);
+    }
+    free(nodes);
+
+MEM_MAPS_CLOSE:
     fclose(mapfile);
 }
 
@@ -485,6 +544,7 @@ static void handle_fd_dir(struct dirent *procent)
 static void handle_proc_ent(struct dirent *procent)
 {
     char user[BUF_SIZE];
+    char txt_node[BUF_SIZE];
     cwd_info ci;
     root_info ri;
     exe_info ei;
@@ -525,12 +585,13 @@ static void handle_proc_ent(struct dirent *procent)
 
     // get exe
     get_exe(procent->d_name, &ei);
+    snprintf(txt_node, BUF_SIZE, "%d", ei.inode);
 
     // print exe
     print_exe(&ei);
 
     // handle maps
-    handle_mem_maps(procent);
+    handle_mem_maps(procent, txt_node);
 
     // handle fd
     handle_fd_dir(procent);
