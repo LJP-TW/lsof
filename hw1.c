@@ -502,6 +502,10 @@ static void hadnle_fd_ent(struct dirent *procent, struct dirent *fdent)
     snprintf(output_info.node, BUF_SIZE, "%lu", info.st_ino);
 
     // NAME
+    if (!strcmp(&path[strlen(path) - 10], " (deleted)")) {
+        path[strlen(path) - 10] = 0;
+    }
+
     strcpy(output_info.name, path);
 
     print_output_info();
